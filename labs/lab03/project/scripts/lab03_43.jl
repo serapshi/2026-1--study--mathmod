@@ -1,0 +1,196 @@
+# ## Лабораторная работа №3. Модель боевых действий
+# вариант 43
+
+using DifferentialEquations
+using Plots
+
+default(fmt = :png)
+
+# ## Папка для сохранения графиков
+function find_plots_dir()
+    starts = String[]
+    push!(starts, pwd())
+    push!(starts, dirname(pwd()))
+    push!(starts, @__DIR__)
+    push!(starts, dirname(@__DIR__))
+    push!(starts, dirname(dirname(@__DIR__)))
+
+    for root in unique(starts)
+        candidate = joinpath(root, "plots")
+        if isdir(candidate)
+            return candidate
+        end
+    end
+
+    error("не найдена существующая папка plots. запусти файл из каталога проекта lab03 или из папки scripts внутри проекта")
+end
+
+plots_dir = find_plots_dir()
+
+# ## 1. Параметры варианта 43
+
+x0 = 22000       # начальная численность армии X
+y0 = 13000        # начальная численность армии Y
+u0 = [x0, y0]
+tspan = (0.0, 1.0)
+
+# Параметры модели 1 (регулярные против регулярных)
+a1 = 0.3
+b1 = 0.8
+c1 = 0.5
+h1 = 0.2
+
+# Параметры модели 2 (регулярные против партизан)
+a2 = 0.2
+b2 = 0.7
+c2 = 0.2
+h2 = 0.1
+
+# Параметры модели 3 (партизаны против партизан)
+a3 = 0.1
+b3 = 0.03
+c3 = 0.004
+h3 = 0.1
+
+# ## Вывод уравнений
+
+println("Модель 1: регулярные войска против регулярных")
+println("dx/dt = -$a1*x(t) - $b1*y(t) + sin(t) + 2")
+println("dy/dt = -$c1*x(t) - $h1*y(t) + 2*|cos(t)|")
+println("Начальные условия: x(0) = $x0, y(0) = $y0")
+
+println("\nМодель 2: регулярные войска и партизаны")
+println("dx/dt = -$a2*x(t) - $b2*y(t) + sin(8t) + 1")
+println("dy/dt = -$c2*x(t)*y(t) - $h2*y(t) + 2*|cos(t)|")
+println("Начальные условия: x(0) = $x0, y(0) = $y0")
+
+println("\nМодель 3: партизаны против партизан")
+println("dx/dt = -$a3*x(t) - $b3*x(t)*y(t) + sin(8t) + 1")
+println("dy/dt = -$h3*y(t) - $c3*x(t)*y(t) + 2*|cos(t)|")
+println("Начальные условия: x(0) = $x0, y(0) = $y0")
+
+# ## 2. Определение моделей
+
+# модель 1: боевые действия между регулярными войсками
+function combat_regular_43!(du, u, p, t)
+    x, y = u
+    du[1] = -a1 * x - b1 * y + sin(t) + 2
+    du[2] = -c1 * x - h1 * y + 2 * abs(cos(t))
+end
+
+# модель 2: боевые действия с участием регулярных войск и партизанских отрядов
+function combat_mixed_43!(du, u, p, t)
+    x, y = u
+    du[1] = -a2 * x - b2 * y + sin(8t) + 1
+    du[2] = -c2 * x * y - h2 * y + 2 * abs(cos(t))
+end
+
+# модель 3: боевые действия между партизанскими отрядами
+function combat_partisan_43!(du, u, p, t)
+    x, y = u
+    du[1] = -a3 * x - b3 * x * y + sin(8t) + 1
+    du[2] = -h3 * y - c3 * x * y + 2 * abs(cos(t))
+end
+
+# ## 3. Решение систем
+
+prob1 = ODEProblem(combat_regular_43!, u0, tspan)
+sol1 = solve(prob1, Tsit5(), saveat=0.01)
+
+prob2 = ODEProblem(combat_mixed_43!, u0, tspan)
+sol2 = solve(prob2, Rosenbrock23(), saveat=0.01)
+
+prob3 = ODEProblem(combat_partisan_43!, u0, tspan)
+sol3 = solve(prob3, Rosenbrock23(), saveat=0.01)
+
+# ## 4. Анализ победителя
+
+function army_values(sol)
+    t = sol.t
+    x = [max(u[1], 0.0) for u in sol.u]
+    y = [max(u[2], 0.0) for u in sol.u]
+    return t, x, y
+end
+
+function winner_by_solution(sol; limit = 1.0)
+    t, x, y = army_values(sol)
+
+    ix = findfirst(v -> v <= limit, x)
+    iy = findfirst(v -> v <= limit, y)
+
+    tx = ix === nothing ? Inf : t[ix]
+    ty = iy === nothing ? Inf : t[iy]
+
+    if tx < ty
+        return "побеждает армия Y", tx, ty
+    elseif ty < tx
+        return "побеждает армия X", tx, ty
+    else
+        if last(x) > last(y)
+            return "по итоговой численности преимущество у армии X", tx, ty
+        elseif last(y) > last(x)
+            return "по итоговой численности преимущество у армии Y", tx, ty
+        else
+            return "силы сторон примерно равны", tx, ty
+        end
+    end
+end
+
+function print_result(model_name, sol)
+    t, x, y = army_values(sol)
+    result, tx, ty = winner_by_solution(sol)
+
+    println("\n", model_name)
+    println("итоговая численность X: ", round(last(x), digits=2))
+    println("итоговая численность Y: ", round(last(y), digits=2))
+    println("вывод: ", result)
+
+    if isfinite(tx)
+        println("армия X достигает нулевой численности примерно при t = ", round(tx, digits=3))
+    end
+    if isfinite(ty)
+        println("армия Y достигает нулевой численности примерно при t = ", round(ty, digits=3))
+    end
+end
+
+print_result("Модель 1: регулярные войска против регулярных", sol1)
+print_result("Модель 2: регулярные войска и партизаны", sol2)
+print_result("Модель 3: партизаны против партизан", sol3)
+
+# условия победы для упрощенных моделей без подкреплений и небоевых потерь
+condition_regular = c1 * x0^2 - b1 * y0^2
+condition_mixed = b2 / 2 * x0^2 - c2 * y0
+condition_partisan = y0 - (c3 / b3) * x0
+
+println("\nУсловия победы для упрощенных моделей:")
+println("модель 1: если c*x0^2 - b*y0^2 > 0, побеждает X; значение = ", round(condition_regular, digits=2))
+println("модель 2: если (b/2)*x0^2 - c*y0 > 0, побеждает регулярная армия X; значение = ", round(condition_mixed, digits=2))
+println("модель 3: если y0 - (c/b)*x0 < 0, побеждает X; значение = ", round(condition_partisan, digits=2))
+
+# ## 5. Визуализация
+
+function make_plot(sol, title_text)
+    t, x, y = army_values(sol)
+    p = plot(t, x,
+        label = "Армия X",
+        title = title_text,
+        xlabel = "Время",
+        ylabel = "Численность",
+        lw = 2,
+        legend = :topright)
+    plot!(p, t, y, label = "Армия Y", lw = 2)
+    return p
+end
+
+p1 = make_plot(sol1, "Вариант 43: модель 1")
+p2 = make_plot(sol2, "Вариант 43: модель 2")
+p3 = make_plot(sol3, "Вариант 43: модель 3")
+
+final_plot = plot(p1, p2, p3, layout = (3, 1), size = (900, 1000))
+
+savefig(p1, joinpath(plots_dir, "lab03_1_43_model1_regular.png"))
+savefig(p2, joinpath(plots_dir, "lab03_1_43_model2_mixed.png"))
+savefig(p3, joinpath(plots_dir, "lab03_1_43_model3_partisan.png"))
+savefig(final_plot, joinpath(plots_dir, "lab03_43_results.png"))
+
+final_plot
